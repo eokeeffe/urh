@@ -1,20 +1,20 @@
 from PyQt5.QtCore import Qt
 
 from tests.QtTestCase import QtTestCase
-from urh.controller.MessageTypeDialogController import MessageTypeDialogController
+from urh.controller.dialogs.MessageTypeDialog import MessageTypeDialog
 from urh.signalprocessing.MessageType import MessageType
 
 
 class TestMessageTypeOptionsGUI(QtTestCase):
     def setUp(self):
         self.message_type = MessageType(name="Test")
-        self.dialog = MessageTypeDialogController(self.message_type)
+        self.dialog = MessageTypeDialog(self.message_type)
 
         if self.SHOW:
             self.dialog.show()
 
     def test_message_type_dialog_parameters(self):
-        self.assertEqual(self.message_type.name, self.dialog.windowTitle())
+        self.assertIn(self.message_type.name, self.dialog.windowTitle())
         self.assertEqual(self.message_type.assign_manually, not self.dialog.ui.rbAssignAutomatically.isChecked())
         self.assertEqual(self.message_type.assign_manually, self.dialog.ui.rbAssignManually.isChecked())
 
@@ -50,7 +50,8 @@ class TestMessageTypeOptionsGUI(QtTestCase):
 
         for i in range(model.rowCount()):
             for j in range(model.columnCount()):
-                self.assertEqual(model.flags(model.index(i, j)), Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsEditable)
+                self.assertEqual(model.flags(model.index(i, j)),
+                                 Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsEditable)
 
         self.dialog.ui.btnRemoveRule.click()
         self.assertEqual(num_rules, len(self.message_type.ruleset))

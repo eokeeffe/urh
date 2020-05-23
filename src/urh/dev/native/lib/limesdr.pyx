@@ -1,4 +1,5 @@
-from climesdr cimport *
+import numpy as np
+from urh.dev.native.lib.climesdr cimport *
 from libc.stdlib cimport malloc, free
 # noinspection PyUnresolvedReferences
 from cython.view cimport array as cvarray  # needed for converting of malloc array to python array
@@ -21,6 +22,7 @@ cpdef bool get_tx():
 cpdef set_channel(size_t channel):
     global CHANNEL
     CHANNEL = <size_t>channel
+    return 0
 
 cpdef size_t get_channel():
     return CHANNEL
@@ -59,16 +61,6 @@ cpdef int close():
     :return:  0 on success, (-1) on failure
     """
     return LMS_Close(_c_device)
-
-cpdef int disconnect():
-    """
-    Disconnect device but keep configuration cache (device is not deallocated).
-    :return:  0 on success, (-1) on failure
-    """
-    return LMS_Disconnect(_c_device)
-
-cpdef bool is_open(int port):
-    return LMS_IsOpen(_c_device, port)
 
 cpdef int init():
     """
@@ -164,7 +156,7 @@ cpdef tuple get_sample_rate_range():
 cpdef int set_center_frequency(float_type frequency):
     """
     Set RF center frequency in Hz. This automatically selects the appropriate
-    antenna (band path) for the desired frequency. In oder to override antenna selection use LMS_SetAntenna().
+    antenna (band path) for the desired frequency. In order to override antenna selection use LMS_SetAntenna().
     :param frequency: Desired RF center frequency in Hz
     :return: 0 on success, (-1) on failure
     """
@@ -261,7 +253,7 @@ cpdef calibrate(double bw):
     """
     Perform the automatic calibration of specified RX/TX channel. The automatic
     calibration must be run after device configuration is finished because
-    calibration values are dependant on various configuration settings.
+    calibration values are dependent on various configuration settings.
 
     automatic RX calibration is not available when RX_LNA_H path is
     selected
@@ -327,33 +319,6 @@ cpdef tuple get_nco_frequency():
     else:
         return -1, 1
 
-cpdef get_vco_range(size_t vco_id):
-    """
-    Get VCO value range.
-    
-    :param vco_id: VCO identifier 
-    :return: Tuple (start, end, step) of vco value range, (-1, -1, -1) on Error
-    """
-    cdef lms_range_t vco_range
-    result = LMS_GetVCORange(_c_device, vco_id, &vco_range)
-    if result == 0:
-        return vco_range.min, vco_range.max, vco_range.step
-    else:
-        return -1, -1, -1
-
-cpdef float_type get_reference_clock_hz():
-    """
-    Get the currently set reference clock
-    
-    :return: ref clock in hz on success else -1
-    """
-    cdef float_type clock_hz = 0.0
-    result = LMS_GetReferenceClock(_c_device, &clock_hz)
-    if result == 0:
-        return clock_hz
-    else:
-        return -1
-
 cpdef float_type get_clock_freq(size_t clk_id):
     cdef float_type clock_hz = 0.0
     result = LMS_GetClockFreq(_c_device, clk_id, &clock_hz)
@@ -364,17 +329,6 @@ cpdef float_type get_clock_freq(size_t clk_id):
 
 cpdef int set_clock_freq(size_t clk_id, float_type frequency_hz):
     return LMS_SetClockFreq(_c_device, clk_id, frequency_hz)
-
-cpdef int set_reference_clock(float_type ref_clock_hz):
-    """
-    Changes device reference clock used by API for various calculations.
-    Normally reference clock should be detected automatically based on device.
-    Use this function in case you have replaced the reference crystal.
- 
-    :param ref_clock_hz: reference clock in Hz
-    :return: 0 on success, (-1) on failure
-    """
-    return LMS_SetReferenceClock(_c_device, ref_clock_hz)
 
 cpdef float_type get_chip_temperature():
     """
@@ -435,7 +389,7 @@ cpdef int recv_stream(connection, unsigned num_samples, unsigned timeout_ms):
     :param timeout_ms: how long to wait for data before timing out.
     :return: 
     """
-    cdef lms_stream_meta_t meta
+    cdef lms_stream_meta_t meta = lms_stream_meta_t(0, False, False)
     cdef float*buff = <float *> malloc(num_samples * 2 * sizeof(float))
 
     if not buff:
@@ -450,7 +404,7 @@ cpdef int recv_stream(connection, unsigned num_samples, unsigned timeout_ms):
 
     free(buff)
 
-cpdef int send_stream(float complex[::1] samples, unsigned timeout_ms):
+cpdef int send_stream(float[::1] samples, unsigned timeout_ms):
     """
     Write samples to the FIFO of the specified stream.
     
@@ -458,8 +412,10 @@ cpdef int send_stream(float complex[::1] samples, unsigned timeout_ms):
     :param timeout_ms: how long to wait for data before timing out
     :return: number of samples send on success, (-1) on failure
     """
-    cdef lms_stream_meta_t meta
-    cdef size_t sample_count = len(samples)
+    cdef lms_stream_meta_t meta = lms_stream_meta_t(0, False, False)
+    if len(samples) == 1:
+        samples = np.zeros(1020, dtype=np.float32)
+    cdef size_t sample_count = len(samples) // 2
 
     if len(samples) > 0:
         return LMS_SendStream(&stream, &samples[0], sample_count, &meta, timeout_ms)
@@ -475,10 +431,6 @@ cpdef save_config(str filename):
     filename_byte_string = filename.encode('UTF-8')
     c_filename = <char *> filename_byte_string
     LMS_SaveConfig(_c_device, c_filename)
-
-cpdef perform_register_test():
-    LMS_RegisterTest(_c_device)
-    print_last_error()
 
 cpdef void print_last_error():
     cdef char * error_msg = <char *> malloc(2000 * sizeof(char))

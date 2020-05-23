@@ -1,7 +1,5 @@
-# cython wrapper for RTL-SDR (https://github.com/pinkavaj/rtl-sdr)
-
-cimport crtlsdr
-from libc.stdlib cimport malloc
+cimport urh.dev.native.lib.crtlsdr as crtlsdr
+from libc.stdlib cimport malloc, free
 
 ctypedef unsigned char uint8_t
 ctypedef unsigned short uint16_t
@@ -15,6 +13,23 @@ cdef void _c_callback_recv(unsigned char *buffer, uint32_t length, void *ctx):
     conn = <object> ctx
     (<object>f)(buffer[0:length])
 
+
+IF RTLSDR_BANDWIDTH_SUPPORT == 1:
+    cpdef bandwidth_is_adjustable():
+        return True
+    cpdef int set_tuner_bandwidth(uint32_t bw):
+        """
+        Set the bandwidth for the device.
+    
+        :param bw: bandwidth in Hz. Zero means automatic BW selection.
+        :return 0 on success
+        """
+        return crtlsdr.rtlsdr_set_tuner_bandwidth(_c_device, bw)
+ELSE:
+    cpdef bandwidth_is_adjustable():
+        return False
+    cpdef int set_tuner_bandwidth(uint32_t bw):
+        return -100
 
 cpdef uint32_t get_device_count():
     return crtlsdr.rtlsdr_get_device_count()
@@ -32,10 +47,15 @@ cpdef tuple get_device_usb_strings(uint32_t index):
     cdef char *product = <char *> malloc(256 * sizeof(char))
     cdef char *serial = <char *> malloc(256 * sizeof(char))
     result = crtlsdr.rtlsdr_get_device_usb_strings(index, manufacturer, product, serial)
-    if result == 0:
-        return manufacturer.decode('UTF-8'), product.decode('UTF-8'), serial.decode('UTF-8')
-    else:
-        return None, None, None
+    try:
+        if result == 0:
+            return manufacturer.decode('UTF-8'), product.decode('UTF-8'), serial.decode('UTF-8')
+        else:
+            return None, None, None
+    finally:
+        free(manufacturer)
+        free(product)
+        free(serial)
 
 cpdef int get_index_by_serial(str serial):
     """
@@ -49,6 +69,14 @@ cpdef int get_index_by_serial(str serial):
     """
     serial_byte_string = serial.encode('UTF-8')
     return crtlsdr.rtlsdr_get_index_by_serial(<char *> serial_byte_string)
+
+cpdef list get_device_list():
+    result = []
+    cdef uint32_t i, n = get_device_count()
+    for i in range(n):
+        manufacturer, product, serial = get_device_usb_strings(i)
+        result.append("{} {} (SN: {})".format(manufacturer, product, serial))
+    return result
 
 cpdef int open(uint32_t index):
     return crtlsdr.rtlsdr_open(&_c_device, index)
@@ -150,7 +178,10 @@ cpdef list get_tuner_gains():
     cdef int*gains = <int *> malloc(num_gains * sizeof(int))
     crtlsdr.rtlsdr_get_tuner_gains(_c_device, gains)
 
-    return [gains[i] for i in range(num_gains)]
+    try:
+        return [gains[i] for i in range(num_gains)]
+    finally:
+        free(gains)
 
 cpdef int set_tuner_gain(int gain):
     """
@@ -195,15 +226,6 @@ cpdef int set_tuner_gain_mode(int manual):
     :return: 0 on success
     """
     return crtlsdr.rtlsdr_set_tuner_gain_mode(_c_device, manual)
-
-cpdef int set_tuner_bandwidth(uint32_t bw):
-    """
-    Set the bandwidth for the device.
-
-    :param bw: bandwidth in Hz. Zero means automatic BW selection.
-    :return 0 on success
-    """
-    crtlsdr.rtlsdr_set_tuner_bandwidth(_c_device, bw)
 
 cpdef int set_sample_rate(uint32_t sample_rate):
     """
@@ -282,11 +304,15 @@ cpdef bytes read_sync(int num_samples=8 * 32 * 512):
     :return:
     """
     cdef uint8_t *samples = <uint8_t *> malloc(2*num_samples * sizeof(uint8_t))
+    if not samples:
+        raise MemoryError()
+
     cdef int n_read = 0
-
-    crtlsdr.rtlsdr_read_sync(_c_device, <void *>samples, num_samples, &n_read)
-
-    return bytes(samples[0:n_read])
+    try:
+        crtlsdr.rtlsdr_read_sync(_c_device, <void *>samples, num_samples, &n_read)
+        return bytes(samples[0:n_read])
+    finally:
+        free(samples)
 
 cpdef int read_async(callback, connection):
     """

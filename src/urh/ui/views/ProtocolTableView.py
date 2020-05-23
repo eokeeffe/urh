@@ -1,13 +1,12 @@
+import numpy
 from PyQt5.QtCore import QItemSelection, pyqtSlot
 from PyQt5.QtCore import pyqtSignal, Qt
-from PyQt5.QtGui import QContextMenuEvent
-from PyQt5.QtWidgets import QHeaderView, QAction, QMenu, QActionGroup
 from PyQt5.QtGui import QKeySequence, QDropEvent, QIcon
-import numpy
+from PyQt5.QtWidgets import QHeaderView, QAction, QActionGroup
 
-from urh.signalprocessing.MessageType import MessageType
-from urh.signalprocessing.ProtocoLabel import ProtocolLabel
 from urh.models.ProtocolTableModel import ProtocolTableModel
+from urh.signalprocessing.MessageType import MessageType
+from urh.signalprocessing.Participant import Participant
 from urh.ui.views.TableView import TableView
 
 
@@ -19,7 +18,6 @@ class ProtocolTableView(TableView):
     writeable_changed = pyqtSignal(bool)
     crop_sync_clicked = pyqtSignal()
     revert_sync_cropping_wanted = pyqtSignal()
-    edit_label_clicked = pyqtSignal(ProtocolLabel)
     files_dropped = pyqtSignal(list)
     participant_changed = pyqtSignal()
     new_messagetype_clicked = pyqtSignal(list)  # list of protocol messages
@@ -36,13 +34,15 @@ class ProtocolTableView(TableView):
         self.ref_message_action.setShortcutContext(Qt.WidgetWithChildrenShortcut)
         self.ref_message_action.triggered.connect(self.set_ref_message)
 
-        self.hide_row_action = QAction("Hide selected Rows", self)
+        self.hide_row_action = QAction("Hide selected rows", self)
         self.hide_row_action.setShortcut(QKeySequence("H"))
         self.hide_row_action.setShortcutContext(Qt.WidgetWithChildrenShortcut)
-        self.hide_row_action.triggered.connect(self.hide_row)
+        self.hide_row_action.triggered.connect(self.hide_rows)
 
         self.addAction(self.ref_message_action)
         self.addAction(self.hide_row_action)
+
+        self.zero_hide_offsets = dict()
 
     def model(self) -> ProtocolTableModel:
         return super().model()
@@ -68,34 +68,7 @@ class ProtocolTableView(TableView):
             self.files_dropped.emit(event.mimeData().urls())
 
     def create_context_menu(self):
-        menu = QMenu()
-
-        view_group = QActionGroup(self)
-        view_menu = menu.addMenu("View")
-
-        bit_action = view_menu.addAction("Bits")  # type: QAction
-        bit_action.setCheckable(True)
-        bit_action.setActionGroup(view_group)
-        bit_action.triggered.connect(self.on_bit_action_triggered)
-
-        hex_action = view_menu.addAction("Hex")
-        hex_action.setCheckable(True)
-        hex_action.setActionGroup(view_group)
-        hex_action.triggered.connect(self.on_hex_action_triggered)
-
-        ascii_action = view_menu.addAction("ASCII")
-        ascii_action.setCheckable(True)
-        ascii_action.setActionGroup(view_group)
-        ascii_action.triggered.connect(self.on_ascii_action_triggered)
-
-        if self.model().proto_view == 0:
-            bit_action.setChecked(True)
-        elif self.model().proto_view == 1:
-            hex_action.setChecked(True)
-        elif self.model().proto_view == 2:
-            ascii_action.setChecked(True)
-
-        menu.addSeparator()
+        menu = super().create_context_menu()
         row = self.rowAt(self.context_menu_pos.y())
         cols = [index.column() for index in self.selectionModel().selectedIndexes() if index.row() == row]
         cols.sort()
@@ -119,10 +92,40 @@ class ProtocolTableView(TableView):
                 if selected_message_type == -1 and selected_participant == -1:
                     break
 
+        message_type_menu_str = self.tr("Message type")
+        if selected_message_type != -1:
+            message_type_menu_str += self.tr(" (" + selected_message_type.name + ")")
+        message_type_menu = menu.addMenu(message_type_menu_str)
+        message_type_menu.setIcon(QIcon(":/icons/icons/message_type.svg"))
+        message_type_group = QActionGroup(self)
+        self.message_type_actions = {}
+
+        for message_type in self.model().protocol.message_types:
+            action = message_type_menu.addAction(message_type.name)
+            action.setCheckable(True)
+            action.setActionGroup(message_type_group)
+
+            if selected_message_type == message_type:
+                action.setChecked(True)
+
+            self.message_type_actions[action] = message_type
+            action.triggered.connect(self.on_message_type_action_triggered)
+
+        new_message_type_action = message_type_menu.addAction("Create new")
+        new_message_type_action.setIcon(QIcon.fromTheme("list-add"))
+        new_message_type_action.triggered.connect(self.on_new_message_type_action_triggered)
+
         if self.model().participants and self.model().protocol and not self.selection_is_empty:
 
             participant_group = QActionGroup(self)
-            participant_menu = menu.addMenu("Participant")
+            participant_menu_str = self.tr("Participant")
+            if selected_participant is None:
+                participant_menu_str += self.tr(" (None)")
+            elif isinstance(selected_participant, Participant):
+                # Ensure we have correct type as selected_participant can be -1 if multiple participants are selected
+                participant_menu_str += " (" + selected_participant.name + ")"
+
+            participant_menu = menu.addMenu(participant_menu_str)
             none_participant_action = participant_menu.addAction("None")
             none_participant_action.setCheckable(True)
             none_participant_action.setActionGroup(participant_group)
@@ -141,44 +144,11 @@ class ProtocolTableView(TableView):
                 self.participant_actions[pa] = participant
                 pa.triggered.connect(self.on_participant_action_triggered)
 
-        try:
-            self.selected_label = self.controller.get_labels_from_selection(row, row, cols[0], cols[-1])[0]
-            edit_label_action = menu.addAction(self.tr("Edit Label ") + self.selected_label.name)
-            edit_label_action.triggered.connect(self.on_edit_label_action_triggered)
-        except IndexError:
-            self.selected_label = None
-
         menu.addSeparator()
 
-        create_label_action = menu.addAction(self.tr("Add protocol label"))  # type: QAction
-        create_label_action.setIcon(QIcon.fromTheme("list-add"))
-        create_label_action.setEnabled(not self.selection_is_empty)
-        create_label_action.triggered.connect(self.on_create_label_action_triggered)
+        if not self.selection_is_empty:
+            menu.addAction(self.copy_action)
 
-        message_type_menu = menu.addMenu(self.tr("Message type"))
-        message_type_group = QActionGroup(self)
-        self.message_type_actions = {}
-
-        for message_type in self.model().protocol.message_types:
-            action = message_type_menu.addAction(message_type.name)
-            action.setCheckable(True)
-            action.setActionGroup(message_type_group)
-
-            if selected_message_type == message_type:
-                action.setChecked(True)
-
-            self.message_type_actions[action] = message_type
-            action.triggered.connect(self.on_message_type_action_triggered)
-
-        new_message_type_action = message_type_menu.addAction("Create new")
-        new_message_type_action.triggered.connect(self.on_new_message_type_action_triggered)
-
-        menu.addSeparator()
-        if not self.model().is_writeable:
-            show_interpretation_action = menu.addAction(self.tr("Show in Interpretation"))
-            show_interpretation_action.triggered.connect(self.on_show_in_interpretation_action_triggered)
-
-        menu.addSeparator()
         menu.addAction(self.hide_row_action)
         hidden_rows = self.model().hidden_rows
         if len(hidden_rows) > 0:
@@ -188,7 +158,11 @@ class ProtocolTableView(TableView):
         if self.model().refindex != -1:
             menu.addAction(self.ref_message_action)
 
-        menu.addSeparator()
+        if not self.model().is_writeable:
+            show_interpretation_action = menu.addAction(self.tr("Show selection in Interpretation"))
+            show_interpretation_action.setIcon(QIcon.fromTheme("zoom-select"))
+            show_interpretation_action.triggered.connect(self.on_show_in_interpretation_action_triggered)
+
         if self.model().is_writeable:
             writeable_action = menu.addAction(self.tr("Writeable"))
             writeable_action.setCheckable(True)
@@ -211,13 +185,10 @@ class ProtocolTableView(TableView):
                 if act is not None:
                     menu.addAction(act)
 
-        return menu
+                if hasattr(plugin, "zero_hide_offsets"):
+                    self.zero_hide_offsets = plugin.command.zero_hide_offsets
 
-    def contextMenuEvent(self, event: QContextMenuEvent):
-        self.context_menu_pos = event.pos()
-        menu = self.create_context_menu()
-        menu.exec_(self.mapToGlobal(self.context_menu_pos))
-        self.context_menu_pos = None
+        return menu
 
     @pyqtSlot()
     def set_ref_message(self):
@@ -230,23 +201,35 @@ class ProtocolTableView(TableView):
         else:
             self.model().refindex = self.rowAt(self.context_menu_pos.y())
 
-    @pyqtSlot()
-    def hide_row(self, row=None):
-        if row is None:
-            rows = [index.row() for index in self.selectionModel().selectedIndexes()]
+    def set_row_visibility_status(self, show: bool, rows=None):
+        if rows is None:
+            rows = self.selected_rows
+        elif isinstance(rows, set) or isinstance(rows, list) or isinstance(rows, range):
+            rows = rows
         else:
-            rows = [row]
+            rows = [rows]
 
         refindex = self.model().refindex
         for row in rows:
-            if row == refindex:
-                refindex += 1
-            self.hideRow(row)
-            self.model().hidden_rows.add(row)
-        if refindex < self.model().row_count:
-            self.model().refindex = refindex
+            if show:
+                self.showRow(row)
+                self.model().hidden_rows.discard(row)
+            else:
+                if row == refindex:
+                    refindex += 1
+                self.hideRow(row)
+                self.model().hidden_rows.add(row)
+
+        self.model().refindex = refindex
         self.model().update()
         self.row_visibility_changed.emit()
+
+    def show_rows(self, rows=None):
+        self.set_row_visibility_status(show=True, rows=rows)
+
+    @pyqtSlot()
+    def hide_rows(self, row=None):
+        self.set_row_visibility_status(show=False, rows=row)
 
     @pyqtSlot()
     def on_bit_action_triggered(self):
@@ -273,15 +256,6 @@ class ProtocolTableView(TableView):
         self.participant_changed.emit()
 
     @pyqtSlot()
-    def on_edit_label_action_triggered(self):
-        self.edit_label_clicked.emit(self.selected_label)
-
-    @pyqtSlot()
-    def on_create_label_action_triggered(self):
-        _, _, start, end = self.selection_range()
-        self.model().addProtoLabel(start, end - 1, self.rowAt(self.context_menu_pos.y()))
-
-    @pyqtSlot()
     def on_message_type_action_triggered(self):
         self.messagetype_selected.emit(self.message_type_actions[self.sender()], self.selected_messages)
 
@@ -292,6 +266,11 @@ class ProtocolTableView(TableView):
     @pyqtSlot()
     def on_show_in_interpretation_action_triggered(self):
         min_row, max_row, start, end = self.selection_range()
+
+        offsets = self.zero_hide_offsets.get(min_row, dict())
+        start += sum(offsets[i] for i in offsets if i <= start)
+        end += sum(offsets[i] for i in offsets if i <= end)
+
         self.show_interpretation_clicked.emit(min_row, start, max_row, end - 1)
 
     @pyqtSlot()

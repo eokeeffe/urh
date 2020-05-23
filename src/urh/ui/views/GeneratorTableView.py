@@ -1,7 +1,7 @@
 from PyQt5.QtCore import Qt, QRect, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QDragMoveEvent, QDragEnterEvent, QPainter, QBrush, QColor, QPen, QDropEvent, QDragLeaveEvent, \
-    QContextMenuEvent
-from PyQt5.QtWidgets import QActionGroup
+    QContextMenuEvent, QIcon
+from PyQt5.QtWidgets import QActionGroup, QInputDialog
 
 from PyQt5.QtWidgets import QHeaderView, QAbstractItemView, QStyleOption, QMenu
 
@@ -10,8 +10,6 @@ from urh.ui.views.TableView import TableView
 
 
 class GeneratorTableView(TableView):
-    create_fuzzing_label_clicked = pyqtSignal(int, int, int)
-    edit_fuzzing_label_clicked = pyqtSignal(int)
     encodings_updated = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -142,33 +140,26 @@ class GeneratorTableView(TableView):
             painter.drawLine(rect.topLeft(), rect.topRight())
 
     def create_context_menu(self) -> QMenu:
-        assert self.context_menu_pos is not None
-        menu = QMenu()
-        selected_label_index = self.model().get_selected_label_index(row=self.rowAt(self.context_menu_pos.y()),
-                                                                     column=self.columnAt(self.context_menu_pos.x()))
+        menu = super().create_context_menu()
+
+        add_message_action = menu.addAction("Add empty message...")
+        add_message_action.setIcon(QIcon.fromTheme("edit-table-insert-row-below"))
+        add_message_action.triggered.connect(self.on_add_message_action_triggered)
+
+        if not self.selection_is_empty:
+            menu.addAction(self.copy_action)
 
         if self.model().row_count > 0:
-            if selected_label_index == -1:
-                fuzzing_action = menu.addAction("Create Fuzzing Label...")
-            else:
-                fuzzing_action = menu.addAction("Edit Fuzzing Label...")
-
-            fuzzing_action.triggered.connect(self.on_fuzzing_action_triggered)
-            menu.addSeparator()
-
-            column_menu = menu.addMenu("Add column")
-
-            insert_column_left_action = column_menu.addAction("on the left")
-            insert_column_left_action.triggered.connect(self.on_insert_column_left_action_triggered)
-            insert_column_right_action = column_menu.addAction("on the right")
-            insert_column_right_action.triggered.connect(self.on_insert_column_right_action_triggered)
-
-            duplicate_action = menu.addAction("Duplicate Line")
+            duplicate_action = menu.addAction("Duplicate selected lines")
+            duplicate_action.setIcon(QIcon.fromTheme("edit-table-insert-row-under"))
             duplicate_action.triggered.connect(self.on_duplicate_action_triggered)
 
+            self._add_insert_column_menu(menu)
+
             menu.addSeparator()
-            clear_action = menu.addAction("Clear Table")
+            clear_action = menu.addAction("Clear table")
             clear_action.triggered.connect(self.on_clear_action_triggered)
+            clear_action.setIcon(QIcon.fromTheme("edit-clear"))
 
         self.encoding_actions = {}
 
@@ -195,33 +186,9 @@ class GeneratorTableView(TableView):
 
         return menu
 
-    def contextMenuEvent(self, event: QContextMenuEvent):
-        self.context_menu_pos = event.pos()
-        menu = self.create_context_menu()
-        menu.exec_(self.mapToGlobal(event.pos()))
-
-    @pyqtSlot()
-    def on_fuzzing_action_triggered(self):
-        selected_label_index = self.model().get_selected_label_index(row=self.rowAt(self.context_menu_pos.y()),
-                                                                     column=self.columnAt(self.context_menu_pos.x()))
-        if selected_label_index == -1:
-            min_row, max_row, start, end = self.selection_range()
-            self.create_fuzzing_label_clicked.emit(min_row, start, end)
-        else:
-            self.edit_fuzzing_label_clicked.emit(selected_label_index)
-
-    @pyqtSlot()
-    def on_insert_column_left_action_triggered(self):
-        self.model().insert_column(self.selection_range()[2], self.selected_rows)
-
-    @pyqtSlot()
-    def on_insert_column_right_action_triggered(self):
-        self.model().insert_column(self.selection_range()[3], self.selected_rows)
-
     @pyqtSlot()
     def on_duplicate_action_triggered(self):
-        row = self.rowAt(self.context_menu_pos.y())
-        self.model().duplicate_row(row)
+        self.model().duplicate_rows(self.selected_rows)
 
     @pyqtSlot()
     def on_clear_action_triggered(self):
@@ -232,3 +199,11 @@ class GeneratorTableView(TableView):
         for row in self.selected_rows:
             self.model().protocol.messages[row].decoder = self.encoding_actions[self.sender()]
         self.encodings_updated.emit()
+
+    @pyqtSlot()
+    def on_add_message_action_triggered(self):
+        row = self.rowAt(self.context_menu_pos.y())
+        num_bits, ok = QInputDialog.getInt(self, self.tr("How many bits shall the new message have?"),
+                                           self.tr("Number of bits:"), 42, 1)
+        if ok:
+            self.model().add_empty_row_behind(row, num_bits)

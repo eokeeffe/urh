@@ -4,7 +4,9 @@
 #
 # WARNING! All changes made in this file will be lost!
 
+
 from PyQt5 import QtCore, QtGui, QtWidgets
+
 
 class Ui_SignalDetails(object):
     def setupUi(self, SignalDetails):
@@ -80,7 +82,6 @@ class Ui_SignalDetails(object):
         self.verticalLayout.addItem(spacerItem1)
 
         self.retranslateUi(SignalDetails)
-        QtCore.QMetaObject.connectSlotsByName(SignalDetails)
 
     def retranslateUi(self, SignalDetails):
         _translate = QtCore.QCoreApplication.translate
@@ -98,5 +99,4 @@ class Ui_SignalDetails(object):
         self.lFileCreated.setText(_translate("SignalDetails", "TextLabel"))
         self.label_7.setText(_translate("SignalDetails", "Duration:"))
         self.lDuration.setText(_translate("SignalDetails", "42s"))
-
 from urh.ui.KillerDoubleSpinBox import KillerDoubleSpinBox

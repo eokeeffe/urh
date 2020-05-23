@@ -2,9 +2,10 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtTest import QTest
 
 from tests.QtTestCase import QtTestCase
-from urh import constants
-from urh.controller.FuzzingDialogController import FuzzingDialogController
-from urh.signalprocessing.encoder import Encoder
+from urh import settings
+from urh.controller.dialogs.FuzzingDialog import FuzzingDialog
+from urh.signalprocessing.Encoding import Encoding
+from urh.signalprocessing.Modulator import Modulator
 
 
 class TestFuzzingDialog(QtTestCase):
@@ -15,23 +16,22 @@ class TestFuzzingDialog(QtTestCase):
         self.form.signal_tab_controller.signal_frames[0].ui.spinBoxNoiseTreshold.editingFinished.emit()
         self.form.signal_tab_controller.signal_frames[0].ui.spinBoxCenterOffset.setValue(-0.0127)
         self.form.signal_tab_controller.signal_frames[0].ui.spinBoxCenterOffset.editingFinished.emit()
-        self.form.signal_tab_controller.signal_frames[0].ui.spinBoxInfoLen.setValue(100)
-        self.form.signal_tab_controller.signal_frames[0].ui.spinBoxInfoLen.editingFinished.emit()
+        self.form.signal_tab_controller.signal_frames[0].ui.spinBoxSamplesPerSymbol.setValue(100)
+        self.form.signal_tab_controller.signal_frames[0].ui.spinBoxSamplesPerSymbol.editingFinished.emit()
 
         self.gframe = self.form.generator_tab_controller
         self.gframe.ui.cbViewType.setCurrentIndex(1)  # hex view
+        self.gframe.modulators.append(Modulator("Prevent Modulation bootstrap when adding first protocol"))
+        self.gframe.refresh_modulators()
 
         # Dewhitening mit SyncByte 0x9a7d9a7d, Data Whitening Poly 0x21, Compute and apply CRC16 via X0r,
         # Rest auf False anlegen und setzen
         self.form.ui.tabWidget.setCurrentIndex(1)
         self.form.compare_frame_controller.ui.cbProtoView.setCurrentIndex(1)  # Hex
-        decoding = Encoder(["Data Whitening", constants.DECODING_DATAWHITENING, "0x9a7d9a7d;0x21;0x8"])
+        decoding = Encoding(["Data Whitening", settings.DECODING_DATAWHITENING, "0x9a7d9a7d;0x21"])
         self.form.compare_frame_controller.decodings.append(decoding)
         self.form.compare_frame_controller.ui.cbDecoding.addItem(decoding.name)
         self.form.compare_frame_controller.set_decoding(decoding)
-
-        # CRC Check
-        self.assertEqual(self.form.compare_frame_controller.protocol_model.display_data[0][-4:], "0000")
 
         # Serial Part 1: Bits 207-226 (Dezimal: 91412) (20 Bits)
         self.form.compare_frame_controller.add_protocol_label(start=206, end=225, messagenr=0, proto_view=0,
@@ -59,8 +59,8 @@ class TestFuzzingDialog(QtTestCase):
         self.assertEqual(self.gframe.table_model.row_count, 1)
         self.assertEqual(len(self.gframe.table_model.protocol.protocol_labels), 3)
 
-        self.dialog = FuzzingDialogController(protocol=self.gframe.table_model.protocol, label_index=0, msg_index=0,
-                                              proto_view=0, parent=self.gframe)
+        self.dialog = FuzzingDialog(protocol=self.gframe.table_model.protocol, label_index=0, msg_index=0,
+                                    proto_view=0, parent=self.gframe)
         self.dialog.finished.connect(self.gframe.refresh_label_list)
         self.dialog.finished.connect(self.gframe.refresh_table)
         self.dialog.finished.connect(self.gframe.set_fuzzing_ui_status)

@@ -1,30 +1,30 @@
-from tests.QtTestCase import QtTestCase
+import os
+import tempfile
+import unittest
+
 from tests.utils_testing import get_path_for_data_file
-from urh import constants
+from urh.signalprocessing.Message import Message
 from urh.signalprocessing.ProtocolAnalyzer import ProtocolAnalyzer
 from urh.signalprocessing.Signal import Signal
 
 
-class TestProtocolAnalyzer(QtTestCase):
-    def setUp(self):
-        pass
-
+class TestProtocolAnalyzer(unittest.TestCase):
     def test_get_bit_sample_pos(self):
         signal = Signal(get_path_for_data_file("ASK_mod.complex"), "Bit sample pos test")
-        signal.modulation_type = 0
-        signal.bit_len = 100
+        signal.modulation_type = "ASK"
+        signal.samples_per_symbol = 100
 
         proto_analyzer = ProtocolAnalyzer(signal)
         proto_analyzer.get_protocol_from_signal()
         self.assertEqual(proto_analyzer.num_messages, 1)
         for i, pos in enumerate(proto_analyzer.messages[0].bit_sample_pos):
-            self.assertLess(pos, signal.num_samples, msg = i)
+            self.assertLess(pos, signal.num_samples, msg=i)
 
     def test_fsk_freq_detection(self):
         s = Signal(get_path_for_data_file("steckdose_anlernen.complex"), "RWE")
         s.noise_threshold = 0.06
-        s.qad_center = 0
-        s.bit_len = 100
+        s.center = 0
+        s.samples_per_symbol = 100
         pa = ProtocolAnalyzer(s)
         pa.get_protocol_from_signal()
         self.assertEqual(pa.messages[0].plain_bits_str,
@@ -35,27 +35,33 @@ class TestProtocolAnalyzer(QtTestCase):
                          "10110010100011111101110111000010111100111101001011101101011011010110101011100")
 
         freq = pa.estimate_frequency_for_one(1e6)
-        self.assertAlmostEqual(1, freq / 10000, places = 1)  # Freq for 1 is 10K
+        self.assertEqual(1, int(freq / 10000))  # Freq for 1 is 10K
         freq = pa.estimate_frequency_for_zero(1e6)
-        self.assertAlmostEqual(3, freq / 10000, places = 1)  # Freq for 0 is 30K
+        self.assertEqual(3, int(freq / 10000))  # Freq for 0 is 30K
 
-    def test_symbols(self):
-        old_sym_len = constants.SETTINGS.value('rel_symbol_length', type=int)
-        constants.SETTINGS.setValue('rel_symbol_length', 20)  # Set Symbol length for this test
-        s = Signal(get_path_for_data_file("vw_symbols.complex"), "VW")
-        s.noise_threshold = 0.0111
-        s.qad_center = 0.0470
-        s.bit_len = 500
-        s.modulation_type = 0  # ASK
-        pa = ProtocolAnalyzer(s)
-        pa.get_protocol_from_signal()
-        message = pa.messages[0]
-        for i in range(255):  # First 255 are bits
-            self.assertEqual(type(message[i]), bool)
-        for i in range(255, 261):
-            self.assertNotEqual(type(message[i]), bool)  # 6 Symbols
-            print("Symbol", message[i].name, "NSamples:", message[i].nsamples, "Pulsetype:", message[i].pulsetype)
-        symbols = message.plain_bits_str[255:261]
-        self.assertEqual(symbols, "ABABAB")
+    def test_get_rssi_of_message(self):
+        signal = Signal(get_path_for_data_file("two_participants.complex16s"), "RSSI-Test")
+        signal.modulation_type = "FSK"
+        signal.samples_per_symbol = 100
+        signal.center = -0.0507
 
-        constants.SETTINGS.setValue('rel_symbol_length', old_sym_len)  # Restore Symbol Length
+        proto_analyzer = ProtocolAnalyzer(signal)
+        proto_analyzer.get_protocol_from_signal()
+        self.assertEqual(proto_analyzer.num_messages, 18)
+        messages = proto_analyzer.messages
+        self.assertLess(messages[0].rssi, messages[1].rssi)
+        self.assertGreater(messages[1].rssi, messages[2].rssi)
+        self.assertLess(messages[2].rssi, messages[3].rssi)
+        self.assertLess(messages[-2].rssi, messages[-1].rssi)
+
+    def test_binary_format(self):
+        pa = ProtocolAnalyzer(None)
+        pa.messages.append(Message([1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1], 0, pa.default_message_type))
+        pa.messages.append(Message([1, 1, 1, 0, 1], 0, pa.default_message_type))
+
+        filename = os.path.join(tempfile.gettempdir(), "test_proto.bin")
+        pa.to_binary(filename, use_decoded=True)
+
+        pa.from_binary(filename)
+        self.assertEqual(len(pa.messages), 3)
+        self.assertEqual(pa.plain_bits_str[2], "111000111001101111101000")

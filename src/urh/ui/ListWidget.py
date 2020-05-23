@@ -1,8 +1,8 @@
 from PyQt5.QtCore import Qt, QEvent, pyqtSignal, pyqtSlot
-from PyQt5.QtGui import QDragEnterEvent, QContextMenuEvent, QIcon
+from PyQt5.QtGui import QDragEnterEvent, QContextMenuEvent, QIcon, QDropEvent
 from PyQt5.QtWidgets import QListWidget, QMenu
 
-from urh import constants
+from urh import settings
 
 
 class ListWidget(QListWidget):
@@ -16,6 +16,16 @@ class ListWidget(QListWidget):
         self.active_element_text = ""
         self.context_menu_pos = None
 
+    def dropEvent(self, event: QDropEvent):
+        super().dropEvent(event)
+        if self.count() > 0:
+            item = self.itemAt(event.pos())
+            if item is not None:
+                index = self.indexFromItem(item).row()
+                self.setCurrentRow(index)
+            else:
+                self.setCurrentRow(self.count()-1)
+
     def dragEnterEvent(self, event: QDragEnterEvent):
         self.active_element = self.indexAt(event.pos()).row()
         event.accept()
@@ -24,7 +34,8 @@ class ListWidget(QListWidget):
     def eventFilter(self, sender, event):
         if event.type() == QEvent.ChildRemoved:
             self.internalMove.emit()
-        elif event.type() == QEvent.KeyPress and (event.key() == Qt.Key_Delete or event.key() == Qt.Key_Backspace):
+        elif event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Delete, Qt.Key_Backspace)\
+                and self.currentItem() is not None:
             item = self.currentRow()
             item_name = self.currentItem().text()
             self.active_element_text = item_name
@@ -44,7 +55,7 @@ class ListWidget(QListWidget):
         rm_action = menu.addAction(self.tr("Delete"))
         rm_action.setIcon(QIcon.fromTheme("list-remove"))
         rm_action.triggered.connect(self.on_rm_action_triggered)
-        if constants.DECODING_DISABLED_PREFIX in item_name:
+        if settings.DECODING_DISABLED_PREFIX in item_name:
             disable_function = menu.addAction(self.tr("Enable"))
         else:
             disable_function = menu.addAction(self.tr("Disable"))
@@ -74,10 +85,10 @@ class ListWidget(QListWidget):
     def on_disable_function_triggered(self):
         item = self.indexAt(self.context_menu_pos).row()
         item_name = self.item(item).text()
-        if constants.DECODING_DISABLED_PREFIX in item_name:
-            item_name = item_name[len(constants.DECODING_DISABLED_PREFIX):]
+        if settings.DECODING_DISABLED_PREFIX in item_name:
+            item_name = item_name[len(settings.DECODING_DISABLED_PREFIX):]
         else:
-            item_name = constants.DECODING_DISABLED_PREFIX + item_name
+            item_name = settings.DECODING_DISABLED_PREFIX + item_name
         self.takeItem(item)
         self.insertItem(item, item_name)
         self.internalMove.emit()

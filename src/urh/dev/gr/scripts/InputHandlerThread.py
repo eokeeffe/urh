@@ -1,6 +1,10 @@
-from Queue import Queue, Empty
-from threading import Thread
 import sys
+if sys.version_info[0] >= 3:
+    from queue import Queue, Empty
+else:
+    from Queue import Queue, Empty
+
+from threading import Thread
 import time
 
 
@@ -80,7 +84,7 @@ class InputHandlerThread(Thread):
                             v = 1
                         self.device.set_freq_correction(v)
                     elif i.startswith("DSM:"):
-                        print("Gnuradio does not support setting direct sampling mode live.")
+                        print("GNU Radio does not support setting direct sampling mode live.")
 
             time.sleep(0.1)
 

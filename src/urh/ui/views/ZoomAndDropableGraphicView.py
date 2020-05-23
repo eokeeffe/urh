@@ -1,9 +1,12 @@
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtGui import QDragEnterEvent, QDropEvent
+from urh.signalprocessing.IQArray import IQArray
 
-from urh.SignalSceneManager import SignalSceneManager
+from urh.cythonext import util
+
 from urh.signalprocessing.ProtocolAnalyzer import ProtocolAnalyzer
 from urh.signalprocessing.Signal import Signal
+from urh.ui.painting.SignalSceneManager import SignalSceneManager
 from urh.ui.views.ZoomableGraphicView import ZoomableGraphicView
 
 
@@ -44,9 +47,6 @@ class ZoomAndDropableGraphicView(ZoomableGraphicView):
         if signal is None:
             return
 
-        self.draw_signal(signal, proto_analyzer)
-
-    def draw_signal(self, signal, proto_analyzer):
         if signal is None:
             return
 
@@ -60,13 +60,19 @@ class ZoomAndDropableGraphicView(ZoomableGraphicView):
 
         self.signal_loaded.emit(self.proto_analyzer)
 
-    def eliminate(self):
-        if self.signal is not None:
-            self.signal.eliminate()
-            self.signal = None
-        if self.proto_analyzer is not None:
-            self.proto_analyzer.eliminate()
-            self.proto_analyzer = None
+    def auto_fit_view(self):
+        super().auto_fit_view()
 
+        plot_min, plot_max = util.minmax(self.signal.real_plot_data)
+        data_min, data_max = IQArray.min_max_for_dtype(self.signal.real_plot_data.dtype)
+        self.scale(1, (data_max - data_min) / (plot_max-plot_min))
+
+        self.centerOn(self.view_rect().x() + self.view_rect().width() / 2, self.y_center)
+
+    def eliminate(self):
+        # Do _not_ call eliminate() for self.signal and self.proto_analyzer
+        # as these are references to the original data!
+        self.signal = None
+        self.proto_analyzer = None
         self.signal_tree_root = None
         super().eliminate()

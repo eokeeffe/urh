@@ -19,7 +19,10 @@ class VMHelper(object):
     def start_vm(self):
         call('VBoxManage startvm "{0}"'.format(self.vm_name), shell=True)
 
-    def stop_vm(self):
+    def stop_vm(self, save=True):
+        if save:
+            call('VBoxManage controlvm "{0}" savestate'.format(self.vm_name), shell=True)
+            return
         if self.use_ssh:
             self.send_command("sudo shutdown -h now")
         else:
@@ -28,10 +31,12 @@ class VMHelper(object):
     def wait_for_vm_up(self):
         if not self.__vm_is_up:
             print("Waiting for {} to come up.".format(self.vm_name))
-            while self.__send_command("echo", hide_output=True, print_command=False) != 0:
+            command = "ping -c 1" if self.use_ssh else "ping -n 1"
+            command += " github.com"
+
+            while self.__send_command(command, hide_output=True, print_command=False) != 0:
                 time.sleep(1)
 
-            time.sleep(3)  # sleep another 3 seconds to ensure everything is up under windows
             self.__vm_is_up = True
 
     def send_command(self, command: str) -> int:
@@ -65,7 +70,7 @@ class TestInstallation(unittest.TestCase):
             #"ubuntu1404",
             "ubuntu1604",
             #"kali",
-            # "gentoo"   # cant test gentoo till this bug is fixed: https://github.com/docker/docker/issues/1916#issuecomment-184356102
+            # "gentoo"   # can't test gentoo till this bug is fixed: https://github.com/docker/docker/issues/1916#issuecomment-184356102
         ]
 
         for distribution in distributions:

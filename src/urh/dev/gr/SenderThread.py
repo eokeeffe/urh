@@ -1,32 +1,32 @@
-import select
 import socket
+import time
 
 import numpy
 import numpy as np
-import time
-import zmq
 
 from urh.dev.gr.AbstractBaseThread import AbstractBaseThread
+from urh.util import util
 from urh.util.Logger import logger
 
 
 class SenderThread(AbstractBaseThread):
-    MAX_SAMPLES_PER_TRANSMISSION = 65536
+    MAX_SAMPLES_PER_TRANSMISSION = 4096
 
-    def __init__(self, freq, sample_rate, bandwidth, gain, if_gain, baseband_gain, ip='127.0.0.1', parent=None):
-        super().__init__(freq, sample_rate, bandwidth, gain, if_gain, baseband_gain, False, ip, parent)
+    def __init__(self, frequency, sample_rate, bandwidth, gain, if_gain, baseband_gain, ip='127.0.0.1', parent=None):
+        super().__init__(frequency, sample_rate, bandwidth, gain, if_gain, baseband_gain, False, ip, parent)
 
         self.data = numpy.empty(1, dtype=numpy.complex64)
-        self.context = zmq.Context()
-        self.socket = self.context.socket(zmq.PUSH)
-        self.gr_port = self.socket.bind_to_random_port("tcp://{0}".format(self.ip))
-        self.max_repeats = 1  # How often shall we send the data?
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        port = util.get_free_port()
+        self.gr_port = port
+
+        self.sending_repeats = 1  # How often shall we send the data?
 
         self.__samples_per_transmission = self.MAX_SAMPLES_PER_TRANSMISSION
 
     @property
     def repeat_endless(self):
-        return self.max_repeats == 0 or self.max_repeats == -1
+        return self.sending_repeats == 0 or self.sending_repeats == -1
 
     @property
     def samples_per_transmission(self):
@@ -49,8 +49,10 @@ class SenderThread(AbstractBaseThread):
 
         try:
             while self.current_index < len_data and not self.isInterruptionRequested():
-                time.sleep(0.1 * (self.samples_per_transmission / self.MAX_SAMPLES_PER_TRANSMISSION))
-                self.socket.send(self.data[self.current_index:self.current_index + self.samples_per_transmission].tostring())
+                time.sleep(self.samples_per_transmission / self.sample_rate)
+                self.socket.sendto(
+                    self.data[self.current_index:self.current_index + self.samples_per_transmission].tostring(),
+                    (self.ip, self.gr_port))
                 self.current_index += self.samples_per_transmission
 
                 if self.current_index >= len_data:
@@ -58,7 +60,7 @@ class SenderThread(AbstractBaseThread):
                 else:
                     continue
 
-                if self.repeat_endless or self.current_iteration < self.max_repeats:
+                if self.repeat_endless or self.current_iteration < self.sending_repeats:
                     self.current_index = 0
 
             self.current_index = len_data - 1

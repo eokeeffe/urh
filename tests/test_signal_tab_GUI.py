@@ -6,40 +6,39 @@ from PyQt5.QtWidgets import QApplication
 
 from tests.QtTestCase import QtTestCase
 from tests.utils_testing import get_path_for_data_file
+from urh.controller.MainController import MainController
+from urh.signalprocessing.Participant import Participant
 
 
 class TestSignalTabGUI(QtTestCase):
-    def test_close_all(self):
-        self.add_signal_to_form("esaver.complex")
+    def test_close_project(self):
+        self.add_signal_to_form("esaver.complex16s")
         self.assertEqual(self.form.signal_tab_controller.num_frames, 1)
-        self.form.close_all()
-        QApplication.instance().processEvents()
-        QTest.qWait(self.CLOSE_TIMEOUT)
+        self.form.close_all_files()
+
         self.assertEqual(self.form.signal_tab_controller.num_frames, 0)
 
         # Add a bunch of signals
         num_frames = 5
         for _ in range(num_frames):
-            self.add_signal_to_form("esaver.complex")
+            self.add_signal_to_form("esaver.complex16s")
 
         self.assertEqual(self.form.signal_tab_controller.num_frames, num_frames)
 
-        self.form.close_all()
-        QApplication.instance().processEvents()
-        QTest.qWait(self.CLOSE_TIMEOUT)
+        self.form.close_project()
 
         self.add_signal_to_form("ask.complex")
         self.assertEqual(self.form.signal_tab_controller.num_frames, 1)
 
     def test_zoom(self):
-        self.add_signal_to_form("esaver.complex")
+        self.add_signal_to_form("esaver.complex16s")
         frame = self.form.signal_tab_controller.signal_frames[0]
         QApplication.instance().processEvents()
         x_zoom = frame.ui.spinBoxXZoom.value()
-        self.assertEqual(x_zoom, 100)
+        self.assertIn(x_zoom, range(100, 111))
 
         for _ in range(10):
-            frame.ui.gvSignal.zoom(1.01)
+            frame.ui.gvSignal.zoom(1.1)
             self.assertGreater(frame.ui.spinBoxXZoom.value(), x_zoom)
             x_zoom = frame.ui.spinBoxXZoom.value()
 
@@ -53,13 +52,11 @@ class TestSignalTabGUI(QtTestCase):
         self.assertNotEqual(samples_in_view, frame.ui.lSamplesInView.text())
 
     def test_load_proto(self):
-        QApplication.instance().processEvents()
-        QTest.qWait(self.WAIT_TIMEOUT_BEFORE_NEW)
-        self.form.add_files([get_path_for_data_file("protocol.proto")])
-        self.assertEqual(self.form.signal_tab_controller.signal_frames[0].ui.lSignalTyp.text(), "Protocol (*.proto)")
+        self.form.add_files([get_path_for_data_file("protocol.proto.xml")])
+        self.assertEqual(self.form.signal_tab_controller.signal_frames[0].ui.lSignalTyp.text(), "Protocol")
 
     def test_graphic_view_selection(self):
-        self.add_signal_to_form("esaver.complex")
+        self.add_signal_to_form("esaver.complex16s")
         frame = self.form.signal_tab_controller.signal_frames[0]
         frame.ui.gvSignal.selection_area.start = 0
         frame.ui.gvSignal.selection_area.end = 4000
@@ -67,6 +64,7 @@ class TestSignalTabGUI(QtTestCase):
 
         self.assertEqual(frame.ui.lNumSelectedSamples.text(), "4000")
 
+        frame.ui.spinBoxNoiseTreshold.setValue(1)
         noise_val = frame.ui.spinBoxNoiseTreshold.value()
         frame.ui.gvSignal.set_noise_clicked.emit()
         self.assertNotEqual(noise_val, frame.ui.spinBoxNoiseTreshold.value())
@@ -77,7 +75,7 @@ class TestSignalTabGUI(QtTestCase):
         self.assertEqual(frame.ui.gvSignal.selection_area.end, 6000)
 
     def test_graphic_view_zoom_to_selection(self):
-        self.add_signal_to_form("esaver.complex")
+        self.add_signal_to_form("esaver.complex16s")
         frame = self.form.signal_tab_controller.signal_frames[0]
         frame.ui.gvSignal.context_menu_position = QPoint(0, 0)
         menu = frame.ui.gvSignal.create_context_menu()
@@ -96,20 +94,20 @@ class TestSignalTabGUI(QtTestCase):
         self.assertEqual(frame.ui.spinBoxSelectionEnd.value(), 4711)
 
     def test_show_hide_start_end(self):
-        self.add_signal_to_form("esaver.complex")
+        self.add_signal_to_form("esaver.complex16s")
         frame = self.form.signal_tab_controller.signal_frames[0]
-        self.assertEqual(frame.ui.btnShowHideStartEnd.text(), "+")
+        self.assertFalse(frame.ui.btnShowHideStartEnd.isChecked())
         frame.ui.btnShowHideStartEnd.click()
-        self.assertEqual(frame.ui.btnShowHideStartEnd.text(), "-")
+        self.assertTrue(frame.ui.btnShowHideStartEnd.isChecked())
 
     def test_apply_to_all(self):
-        self.add_signal_to_form("esaver.complex")
+        self.add_signal_to_form("esaver.complex16s")
         frame = self.form.signal_tab_controller.signal_frames[0]
         self.add_signal_to_form("ask.complex")
         frame2 = self.form.signal_tab_controller.signal_frames[1]
 
-        frame.ui.spinBoxInfoLen.setValue(42)
-        frame.ui.spinBoxInfoLen.editingFinished.emit()
+        frame.ui.spinBoxSamplesPerSymbol.setValue(42)
+        frame.ui.spinBoxSamplesPerSymbol.editingFinished.emit()
 
         frame.ui.spinBoxCenterOffset.setValue(0.1)
         frame.ui.spinBoxCenterOffset.editingFinished.emit()
@@ -120,15 +118,20 @@ class TestSignalTabGUI(QtTestCase):
         frame.ui.spinBoxTolerance.setValue(10)
         frame.ui.spinBoxTolerance.editingFinished.emit()
 
+        frame.signal.pause_threshold = 42
+        frame.signal.message_length_divisor = 10
+
         frame.apply_to_all_clicked.emit(frame.signal)
 
-        self.assertEqual(42, frame2.ui.spinBoxInfoLen.value())
+        self.assertEqual(42, frame2.ui.spinBoxSamplesPerSymbol.value())
         self.assertEqual(0.1, frame2.ui.spinBoxCenterOffset.value())
         self.assertEqual(0.5, frame2.ui.spinBoxNoiseTreshold.value())
         self.assertEqual(10, frame2.ui.spinBoxTolerance.value())
+        self.assertEqual(42, frame2.signal.pause_threshold)
+        self.assertEqual(10, frame2.signal.message_length_divisor)
 
     def test_save_all(self):
-        self.add_signal_to_form("esaver.complex")
+        self.add_signal_to_form("esaver.complex16s")
         frame = self.form.signal_tab_controller.signal_frames[0]
         self.add_signal_to_form("ask.complex")
         frame2 = self.form.signal_tab_controller.signal_frames[1]
@@ -151,7 +154,7 @@ class TestSignalTabGUI(QtTestCase):
         os.remove(frame2.signal.filename)
 
     def test_crop_and_save_signal(self):
-        self.add_signal_to_form("esaver.complex")
+        self.add_signal_to_form("esaver.complex16s")
         frame = self.form.signal_tab_controller.signal_frames[0]
         frame.ui.gvSignal.selection_area.end = 4000
         frame.ui.gvSignal.selection_area.start = 1000
@@ -176,7 +179,7 @@ class TestSignalTabGUI(QtTestCase):
         os.remove(os.path.join(QDir.tempPath(), "sig.complex"))
 
     def test_selection_sync(self):
-        self.add_signal_to_form("esaver.complex")
+        self.add_signal_to_form("esaver.complex16s")
         frame = self.form.signal_tab_controller.signal_frames[0]
         frame.ui.cbProtoView.setCurrentIndex(0)  # set to bit view
         frame.ui.gvSignal.selection_area.end = 128440
@@ -184,28 +187,19 @@ class TestSignalTabGUI(QtTestCase):
         frame.ui.gvSignal.sel_area_start_end_changed.emit(89383, 128440)
         QApplication.instance().processEvents()
         QTest.qWait(100)
-        self.assertEqual(frame.proto_analyzer.messages[0].plain_bits_str, frame.ui.txtEdProto.selected_text)
+        self.assertEqual(frame.proto_analyzer.messages[0].plain_bits_str, frame.ui.txtEdProto.selected_text.strip())
         frame.ui.txtEdProto.show_proto_clicked.emit()
         QApplication.instance().processEvents()
         self.assertAlmostEqual((128440 - 89383) / 1000000,
                                (frame.ui.gvSignal.view_rect().width()) / 1000000, places=1)
 
-    def test_show_demod_view(self):
-        self.add_signal_to_form("esaver.complex")
-        frame = self.form.signal_tab_controller.signal_frames[0]
-        self.assertTrue(frame.ui.gvLegend.isHidden())
-        frame.ui.cbSignalView.setCurrentIndex(1)
-        self.assertFalse(frame.ui.gvLegend.isHidden())
-
     def test_auto_detect_button(self):
-        self.add_signal_to_form("esaver.complex")
+        self.add_signal_to_form("esaver.complex16s")
         frame = self.form.signal_tab_controller.signal_frames[0]
-        self.assertTrue(frame.ui.btnAutoDetect.isChecked())
         frame.ui.btnAutoDetect.click()
-        self.assertFalse(frame.ui.btnAutoDetect.isChecked())
 
     def test_create_new_signal(self):
-        self.add_signal_to_form("esaver.complex")
+        self.add_signal_to_form("esaver.complex16s")
         frame = self.form.signal_tab_controller.signal_frames[0]
         start, end = 400, 8568
         frame.ui.gvSignal.selection_area.end = end
@@ -216,8 +210,6 @@ class TestSignalTabGUI(QtTestCase):
         frame.ui.gvSignal.sel_area_start_end_changed.emit(start, end)
 
         self.assertEqual(self.form.signal_tab_controller.num_frames, 1)
-        QApplication.instance().processEvents()
-        QTest.qWait(self.WAIT_TIMEOUT_BEFORE_NEW)
         frame.ui.gvSignal.on_create_action_triggered()
         QApplication.instance().processEvents()
 
@@ -225,10 +217,42 @@ class TestSignalTabGUI(QtTestCase):
         self.assertEqual(self.form.signal_tab_controller.signal_frames[1].signal.num_samples, end - start)
 
     def test_demodulated_view(self):
-        self.add_signal_to_form("esaver.complex")
+        self.add_signal_to_form("esaver.complex16s")
         frame = self.form.signal_tab_controller.signal_frames[0]
         frame.ui.cbSignalView.setCurrentIndex(1)
         QApplication.instance().processEvents()
         self.assertEqual(frame.ui.gvSignal.scene_type, 1)
-        if self.SHOW:
-            self.assertTrue(frame.ui.gvLegend.isVisible())
+
+    def test_context_menu_text_edit_protocol_view(self):
+        self.add_signal_to_form("esaver.complex16s")
+        self.form.signal_tab_controller.signal_frames[0].ui.cbProtoView.setCurrentIndex(2)
+        text_edit = self.form.signal_tab_controller.signal_frames[0].ui.txtEdProto
+
+        menu = text_edit.create_context_menu()
+        line_wrap_action = next(action for action in menu.actions() if action.text().startswith("Linewrap"))
+        checked = line_wrap_action.isChecked()
+        line_wrap_action.trigger()
+
+        menu = text_edit.create_context_menu()
+        line_wrap_action = next(action for action in menu.actions() if action.text().startswith("Linewrap"))
+        self.assertNotEqual(checked, line_wrap_action.isChecked())
+
+        self.assertEqual(len([action for action in menu.actions() if action.text() == "Participant"]), 0)
+        self.form.project_manager.participants.append(Participant("Alice", "A"))
+        text_edit.selectAll()
+        menu = text_edit.create_context_menu()
+        self.assertEqual(len([action for action in menu.actions() if action.text() == "Participant"]), 1)
+
+    def test_export_demodulated(self):
+        self.add_signal_to_form("esaver.complex16s")
+        assert isinstance(self.form, MainController)
+        self.form.signal_tab_controller.signal_frames[0].ui.gvSignal.context_menu_position = QPoint(0,0)
+        cm = self.form.signal_tab_controller.signal_frames[0].ui.gvSignal.create_context_menu()
+        export_action = next((a for a in cm.actions() if "demodulated" in a.text().lower()), None)
+        self.assertIsNone(export_action)
+
+        self.form.signal_tab_controller.signal_frames[0].ui.cbSignalView.setCurrentIndex(1)
+        cm = self.form.signal_tab_controller.signal_frames[0].ui.gvSignal.create_context_menu()
+        export_action = next((a for a in cm.actions() if "demodulated" in a.text().lower()), None)
+        self.assertIsNotNone(export_action)
+
